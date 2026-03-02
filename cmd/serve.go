@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -10,12 +11,100 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 )
+
+type sseHub struct {
+	clients map[chan string]struct{}
+}
+
+func newSSEHub() *sseHub {
+	return &sseHub{clients: make(map[chan string]struct{})}
+}
+
+func (h *sseHub) add(c chan string) {
+	h.clients[c] = struct{}{}
+}
+
+func (h *sseHub) remove(c chan string) {
+	delete(h.clients, c)
+}
+
+func (h *sseHub) broadcast(msg string) {
+	for c := range h.clients {
+		select {
+		case c <- msg:
+		default:
+		}
+	}
+}
+
+func findFrontendDir(projectRoot string) string {
+	candidates := []string{
+		filepath.Join(projectRoot, "resources", "app"),
+		filepath.Join(projectRoot, "resources", "frontend"),
+	}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
+				return c
+			}
+		}
+	}
+	return ""
+}
+
+func startFrontendWatcher(frontendDir string, hub *sseHub, stop <-chan struct{}) {
+	if frontendDir == "" {
+		return
+	}
+
+	last := time.Now()
+	_ = filepath.Walk(frontendDir, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info == nil {
+			return nil
+		}
+		if info.ModTime().After(last) {
+			last = info.ModTime()
+		}
+		return nil
+	})
+
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			changed := false
+			_ = filepath.Walk(frontendDir, func(p string, info os.FileInfo, err error) error {
+				if err != nil || info == nil {
+					return nil
+				}
+				if info.IsDir() {
+					return nil
+				}
+				name := strings.ToLower(info.Name())
+				if strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css") || strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".svelte") {
+					if info.ModTime().After(last) {
+						last = info.ModTime()
+						changed = true
+					}
+				}
+				return nil
+			})
+			if changed {
+				hub.broadcast("reload")
+			}
+		}
+	}
+}
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -28,8 +117,7 @@ var serveCmd = &cobra.Command{
 		}
 
 		proxyPort := 3000
-		phpPort := 8000
-		vitePort := 5173
+		phpHost := "127.0.0.1"
 
 		fmt.Println("\n\033[1;34m--------------------------------------------------\033[0m")
 		fmt.Printf("\033[1;32m🚀 [Deca] Unified Server: \033[1;36mhttp://localhost:%d\033[0m\n", proxyPort)
@@ -37,11 +125,16 @@ var serveCmd = &cobra.Command{
 		fmt.Println("\033[0;90mCleaning up ports...\033[0m")
 
 		killPort(proxyPort)
-		killPort(phpPort)
-		killPort(vitePort)
 
-		// 1. Start PHP (Silent)
-		phpCmd := exec.Command("php", "-S", fmt.Sprintf("127.0.0.1:%d", phpPort), "-t", "public")
+		// Start PHP on a random localhost port (not exposed). Still single public port: 3000.
+		ln, err := net.Listen("tcp", phpHost+":0")
+		if err != nil {
+			return fmt.Errorf("failed to allocate php port: %w", err)
+		}
+		phpPort := ln.Addr().(*net.TCPAddr).Port
+		_ = ln.Close()
+
+		phpCmd := exec.Command("php", "-S", fmt.Sprintf("%s:%d", phpHost, phpPort), "-t", "public")
 		phpCmd.Dir = projectRoot
 		phpCmd.Stdout = io.Discard
 		phpCmd.Stderr = io.Discard
@@ -49,43 +142,92 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("failed to start php: %w", err)
 		}
 
-		// 2. Start Vite (Silent)
-		viteCmd := exec.Command("npm", "run", "dev", "--", "--port", fmt.Sprintf("%d", vitePort))
-		viteCmd.Dir = projectRoot
-		viteCmd.Stdout = io.Discard
-		viteCmd.Stderr = io.Discard
-		if err := viteCmd.Start(); err != nil {
-			phpCmd.Process.Kill()
-			return fmt.Errorf("failed to start vite: %w", err)
-		}
-
-		fmt.Println("\033[0;90mServers are running in background...\033[0m")
-
-		// 3. Proxy Logic
-		targetBackend, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", phpPort))
-		targetFrontend, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", vitePort))
-
+		targetBackend, _ := url.Parse(fmt.Sprintf("http://%s:%d", phpHost, phpPort))
 		proxyBackend := httputil.NewSingleHostReverseProxy(targetBackend)
-		proxyFrontend := httputil.NewSingleHostReverseProxy(targetFrontend)
 
-		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/src") || 
-			   strings.HasPrefix(r.URL.Path, "/@vite") || 
-			   strings.HasPrefix(r.URL.Path, "/@fs") ||
-			   strings.HasPrefix(r.URL.Path, "/node_modules") || 
-			   r.Header.Get("Upgrade") == "websocket" {
-				proxyFrontend.ServeHTTP(w, r)
-			} else {
-				proxyBackend.ServeHTTP(w, r)
+		frontendDir := findFrontendDir(projectRoot)
+		hub := newSSEHub()
+		watchStop := make(chan struct{})
+		go startFrontendWatcher(frontendDir, hub, watchStop)
+
+		mux := http.NewServeMux()
+
+		// SSE live reload channel
+		mux.HandleFunc("/__deca/live-reload", func(w http.ResponseWriter, r *http.Request) {
+			fl, ok := w.(http.Flusher)
+			if !ok {
+				http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+
+			ch := make(chan string, 8)
+			hub.add(ch)
+			defer hub.remove(ch)
+
+			fmt.Fprint(w, "event: ready\ndata: ok\n\n")
+			fl.Flush()
+
+			ctx := r.Context()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case msg := <-ch:
+					fmt.Fprintf(w, "event: %s\ndata: 1\n\n", msg)
+					fl.Flush()
+				}
 			}
 		})
 
-		server := &http.Server{Addr: fmt.Sprintf(":%d", proxyPort)}
-		go func() {
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				fmt.Printf("Proxy error: %v\n", err)
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			p := r.URL.Path
+
+			// API route -> PHP backend (internal only)
+			if strings.HasPrefix(p, "/api/") {
+				proxyBackend.ServeHTTP(w, r)
+				return
 			}
-		}()
+
+			// Frontend -> static from resources/app (fallback resources/frontend)
+			if frontendDir == "" {
+				http.Error(w, "frontend not found (expected resources/app/index.html)", http.StatusNotFound)
+				return
+			}
+
+			// Serve index.html for SPA routes
+			if p == "/" || !strings.Contains(filepath.Base(p), ".") {
+				b, err := os.ReadFile(filepath.Join(frontendDir, "index.html"))
+				if err != nil {
+					http.Error(w, "failed to read index.html", http.StatusInternalServerError)
+					return
+				}
+				html := string(b)
+				// Inject live-reload script (dev only)
+				inject := `<script>try{var es=new EventSource('/__deca/live-reload');es.addEventListener('reload',function(){location.reload();});}catch(e){}</script>`
+				if strings.Contains(html, "</body>") {
+					html = strings.Replace(html, "</body>", inject+"</body>", 1)
+				} else {
+					html += inject
+				}
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(html))
+				return
+			}
+
+			filePath := filepath.Join(frontendDir, filepath.Clean(p))
+			// Prevent directory traversal
+			if !strings.HasPrefix(filePath, frontendDir) {
+				http.NotFound(w, r)
+				return
+			}
+			http.ServeFile(w, r, filePath)
+		})
+
+		server := &http.Server{Addr: fmt.Sprintf(":%d", proxyPort), Handler: mux}
+		go func() { _ = server.ListenAndServe() }()
 
 		openBrowser(fmt.Sprintf("http://localhost:%d", proxyPort))
 
@@ -94,47 +236,9 @@ var serveCmd = &cobra.Command{
 		<-sigCh
 
 		fmt.Println("\n\033[0;90mStopping Deca servers...\033[0m")
-		phpCmd.Process.Kill()
-		viteCmd.Process.Kill()
-		server.Close()
+		close(watchStop)
+		_ = phpCmd.Process.Kill()
+		_ = server.Close()
 		return nil
 	},
-}
-
-func detectProjectRoot(startDir string) string {
-	curr := startDir
-	for {
-		if _, err := os.Stat(filepath.Join(curr, "public")); err == nil {
-			return curr
-		}
-		parent := filepath.Dir(curr)
-		if parent == curr {
-			break
-		}
-		curr = parent
-	}
-	return ""
-}
-
-func killPort(port int) {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", fmt.Sprintf("for /f \"tokens=5\" %%a in ('netstat -aon ^| findstr :%d ^| findstr LISTENING') do taskkill /F /PID %%a", port))
-	} else {
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("lsof -ti:%d | xargs kill -9 2>/dev/null", port))
-	}
-	_ = cmd.Run()
-}
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	cmd.Start()
 }
