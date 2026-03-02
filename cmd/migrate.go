@@ -19,8 +19,13 @@ var migrateCmd = &cobra.Command{
 var rollbackCmd = &cobra.Command{
 	Use:   "migrate:rollback",
 	Short: "Rollback migrations",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runLubixCmd("migrate:rollback")
+		command := "migrate:rollback"
+		if len(args) == 1 {
+			command = fmt.Sprintf("migrate:rollback . %s", args[0])
+		}
+		return runLubixCmd(command)
 	},
 }
 
