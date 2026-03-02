@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -30,25 +31,35 @@ var serveCmd = &cobra.Command{
 		phpPort := 8000
 		vitePort := 5173
 
-		fmt.Printf("\033[1;34m🚀 [Deca] Starting Unified Server on http://localhost:%d\033[0m\n", proxyPort)
+		fmt.Println("\n\033[1;34m--------------------------------------------------\033[0m")
+		fmt.Printf("\033[1;32m🚀 [Deca] Unified Server: \033[1;36mhttp://localhost:%d\033[0m\n", proxyPort)
+		fmt.Println("\033[1;34m--------------------------------------------------\033[0m")
+		fmt.Println("\033[0;90mCleaning up ports...\033[0m")
 
 		killPort(proxyPort)
 		killPort(phpPort)
 		killPort(vitePort)
 
-		// 1. Start PHP
+		// 1. Start PHP (Silent)
 		phpCmd := exec.Command("php", "-S", fmt.Sprintf("127.0.0.1:%d", phpPort), "-t", "public")
 		phpCmd.Dir = projectRoot
-		phpCmd.Stdout = os.Stdout
-		phpCmd.Stderr = os.Stderr
-		phpCmd.Start()
+		phpCmd.Stdout = io.Discard
+		phpCmd.Stderr = io.Discard
+		if err := phpCmd.Start(); err != nil {
+			return fmt.Errorf("failed to start php: %w", err)
+		}
 
-		// 2. Start Vite
+		// 2. Start Vite (Silent)
 		viteCmd := exec.Command("npm", "run", "dev", "--", "--port", fmt.Sprintf("%d", vitePort))
 		viteCmd.Dir = projectRoot
-		viteCmd.Stdout = os.Stdout
-		viteCmd.Stderr = os.Stderr
-		viteCmd.Start()
+		viteCmd.Stdout = io.Discard
+		viteCmd.Stderr = io.Discard
+		if err := viteCmd.Start(); err != nil {
+			phpCmd.Process.Kill()
+			return fmt.Errorf("failed to start vite: %w", err)
+		}
+
+		fmt.Println("\033[0;90mServers are running in background...\033[0m")
 
 		// 3. Proxy Logic
 		targetBackend, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", phpPort))
@@ -58,8 +69,11 @@ var serveCmd = &cobra.Command{
 		proxyFrontend := httputil.NewSingleHostReverseProxy(targetFrontend)
 
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			// Proxy /assets or HMR or Vite paths to Frontend, else Backend
-			if strings.HasPrefix(r.URL.Path, "/src") || strings.HasPrefix(r.URL.Path, "/@vite") || strings.HasPrefix(r.URL.Path, "/node_modules") || r.Header.Get("Upgrade") == "websocket" {
+			if strings.HasPrefix(r.URL.Path, "/src") || 
+			   strings.HasPrefix(r.URL.Path, "/@vite") || 
+			   strings.HasPrefix(r.URL.Path, "/@fs") ||
+			   strings.HasPrefix(r.URL.Path, "/node_modules") || 
+			   r.Header.Get("Upgrade") == "websocket" {
 				proxyFrontend.ServeHTTP(w, r)
 			} else {
 				proxyBackend.ServeHTTP(w, r)
@@ -67,7 +81,11 @@ var serveCmd = &cobra.Command{
 		})
 
 		server := &http.Server{Addr: fmt.Sprintf(":%d", proxyPort)}
-		go server.ListenAndServe()
+		go func() {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("Proxy error: %v\n", err)
+			}
+		}()
 
 		openBrowser(fmt.Sprintf("http://localhost:%d", proxyPort))
 
@@ -75,7 +93,7 @@ var serveCmd = &cobra.Command{
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		<-sigCh
 
-		fmt.Println("\nStopping Deca servers...")
+		fmt.Println("\n\033[0;90mStopping Deca servers...\033[0m")
 		phpCmd.Process.Kill()
 		viteCmd.Process.Kill()
 		server.Close()
