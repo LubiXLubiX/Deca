@@ -1,6 +1,6 @@
 package main
 
-import "github.com/lubix-software/lubix/cmd"
+import "deca/cmd"
 
 func main() {
 	cmd.Execute()

@@ -1,8 +1,0 @@
-package cmd
-
-import "github.com/spf13/cobra"
-
-var runCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run project commands (dev, serve, build, etc)",
-}

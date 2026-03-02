@@ -8,27 +8,41 @@ import (
 )
 
 var (
-	version   = "0.1.0"
-	commit    = "dev"
-	buildDate = "unknown"
+	version = "1.0.0"
 )
 
 var rootCmd = &cobra.Command{
+	Use:   "deca",
+	Short: "Deca CLI - The Professional Monorepo Toolchain",
+	Long:  `Deca CLI is the ultimate tool for managing LubiX projects with a professional Flutter-like experience.`,
+}
+
+var lubixCmd = &cobra.Command{
 	Use:   "lubix",
-	Short: "LubiX Software CLI",
-	Long:  "LubiX Software CLI - create projects and run the LubiX full-stack dev environment.",
+	Short: "LubiX framework commands",
 }
 
 func Execute() {
-	rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, buildDate)
-	rootCmd.SetVersionTemplate("{{.Version}}\n")
-	rootCmd.VersionTemplate()
-	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(createProjectCmd)
-	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(lubixCmd)
+	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(versionCmd)
+
+	// Add lubix subcommands
+	lubixCmd.AddCommand(serveCmd)
+	lubixCmd.AddCommand(migrateCmd)
+	lubixCmd.AddCommand(rollbackCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print deca version",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("deca version %s\n", version)
+	},
 }

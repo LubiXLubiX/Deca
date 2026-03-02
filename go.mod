@@ -1,4 +1,4 @@
-module github.com/lubix-software/lubix
+module deca
 
 go 1.25.0
 
