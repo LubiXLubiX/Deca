@@ -16,7 +16,8 @@ Deca bridges the gap between modern React reactivity and stable PHP backends by 
 - **Zero-Build React**: Write React/JSX and see changes instantly without `npm install` or complex build steps.
 - **Live Reload (SSE)**: Automatic browser refresh when you save your code.
 - **Database Management**: Integrated commands for migrations and rollbacks.
-- **Cross-Platform**: Full support for macOS, Linux, and Windows.
+- **Code Generation**: Generate controllers, models, and migrations.
+- **Cross-Platform**: Full support for macOS (Intel/Apple Silicon), Linux, and Windows.
 
 ---
 
@@ -65,16 +66,13 @@ go build -o deca
 ---
 
 ## ⚡ Quickstart
-From your LubiX project root:
+Create a new LubiX project and start the unified server:
 ```bash
-# Start the unified dev server
+deca create-project my-app
+cd my-app
+composer install
+cp .env.example .env
 deca lubix serve
-
-# Run database migrations
-deca lubix migrate
-
-# Rollback migrations (1 batch)
-deca lubix migrate:rollback
 ```
 
 ---
@@ -84,10 +82,44 @@ deca lubix migrate:rollback
 | Command | Description |
 | :--- | :--- |
 | `deca version` | Show current version |
+| `deca upgrade` | Upgrade Deca CLI to the latest version (auto) |
+| `deca create-project <name>` | Create a new LubiX project |
 | `deca lubix serve` | Start unified server at `http://localhost:3000` |
+| `deca lubix dev` | Alias for `deca lubix serve` |
 | `deca lubix migrate` | Execute pending database migrations |
 | `deca lubix migrate:rollback [N]` | Rollback N batches of migrations |
+| `deca lubix db:create` | Create the database defined in .env |
+| `deca lubix make:controller <Name>` | Generate a controller |
+| `deca lubix make:model <Name>` | Generate a model |
+| `deca lubix make:migration <name>` | Generate a migration |
 | `deca doctor` | Check system requirements (PHP, CGI, etc.) |
+
+---
+
+## 🔄 Upgrade Deca CLI
+
+### Automatic Upgrade
+```bash
+deca upgrade
+```
+This will:
+- Fetch the latest source from GitHub
+- Build a new binary
+- Replace your current `deca` binary
+- If permission denied, it will show manual steps
+
+### Manual Upgrade
+If automatic upgrade fails or you prefer manual control:
+```bash
+git clone https://github.com/LubiXLubiX/Deca.git
+cd Deca/Deca-CLI
+git pull
+go build -o deca
+# Replace your current binary with the new one
+sudo mv deca /usr/local/bin/deca  # macOS/Linux
+# or
+move .\deca.exe $env:USERPROFILE\bin\deca.exe  # Windows
+```
 
 ---
 
