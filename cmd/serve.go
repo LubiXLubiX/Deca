@@ -72,7 +72,7 @@ func buildBundledAppJS(frontendDir string) (string, error) {
 			Loader:     api.LoaderJSX,
 		},
 		Bundle:            true,
-		External:          []string{"https://*", "react", "react/jsx-runtime", "react-dom", "lucide-react"},
+		External:          []string{"https://*", "react", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom", "lucide-react"},
 		Write:             false,
 		Format:            api.FormatESModule,
 		Platform:          api.PlatformBrowser,
@@ -91,7 +91,16 @@ func buildBundledAppJS(frontendDir string) (string, error) {
 	if len(result.OutputFiles) == 0 {
 		return "", fmt.Errorf("no output from esbuild")
 	}
-	return string(result.OutputFiles[0].Contents), nil
+
+	out := string(result.OutputFiles[0].Contents)
+	// esbuild may emit bare imports for the JSX runtime. Browsers can't resolve these
+	// without an import map. Rewrite them to esm.sh so /deca/app.js can run standalone.
+	out = strings.ReplaceAll(out, "from \"react/jsx-runtime\"", "from \"https://esm.sh/react@18.2.0/jsx-runtime\"")
+	out = strings.ReplaceAll(out, "from 'react/jsx-runtime'", "from 'https://esm.sh/react@18.2.0/jsx-runtime'")
+	out = strings.ReplaceAll(out, "from \"react/jsx-dev-runtime\"", "from \"https://esm.sh/react@18.2.0/jsx-dev-runtime\"")
+	out = strings.ReplaceAll(out, "from 'react/jsx-dev-runtime'", "from 'https://esm.sh/react@18.2.0/jsx-dev-runtime'")
+
+	return out, nil
 }
 
 type sseHub struct {

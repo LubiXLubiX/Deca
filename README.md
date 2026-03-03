@@ -1,4 +1,5 @@
 # Deca CLI
+![Deca Logo](/decabanner.png)
 
 Deca is a cross-platform command-line interface designed for a **zero-config, single-port** development experience in the LubiX ecosystem.
 
