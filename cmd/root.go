@@ -30,8 +30,13 @@ func Execute() {
 
 	// Add lubix subcommands
 	lubixCmd.AddCommand(serveCmd)
+	lubixCmd.AddCommand(devCmd)
 	lubixCmd.AddCommand(migrateCmd)
 	lubixCmd.AddCommand(rollbackCmd)
+	lubixCmd.AddCommand(dbCreateCmd)
+	lubixCmd.AddCommand(makeControllerCmd)
+	lubixCmd.AddCommand(makeModelCmd)
+	lubixCmd.AddCommand(makeMigrationCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
