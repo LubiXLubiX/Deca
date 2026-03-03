@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -58,12 +59,44 @@ var createProjectCmd = &cobra.Command{
 			return err
 		}
 
+		// Auto-setup: .env and composer install
+		fmt.Println("[+] Setting up environment...")
+		envExample := filepath.Join(projectName, ".env.example")
+		envActual := filepath.Join(projectName, ".env")
+		if _, err := os.Stat(envExample); err == nil {
+			copyFile(envExample, envActual)
+		}
+
+		fmt.Println("[+] Installing dependencies (composer install)...")
+		composer := exec.Command("composer", "install")
+		composer.Dir = projectName
+		composer.Stdout = os.Stdout
+		composer.Stderr = os.Stderr
+		if err := composer.Run(); err != nil {
+			fmt.Printf("[!] Warning: composer install failed. You may need to run it manually in %s\n", projectName)
+		}
+
 		fmt.Printf("\n[OK] Project '%s' created successfully\n", projectName)
 		fmt.Println("Next steps:")
 		fmt.Printf("  cd %s\n", projectName)
 		fmt.Println("  deca lubix serve")
 		return nil
 	},
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func init() {
