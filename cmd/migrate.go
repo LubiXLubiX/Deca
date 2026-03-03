@@ -36,6 +36,6 @@ func runLubixCmd(command string) error {
 	c.Dir = root
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	fmt.Printf("🚀 [Deca] Running lubix %s...\n", command)
+	fmt.Printf("[+] [Deca] Running deca lubix %s...\n", command)
 	return c.Run()
 }

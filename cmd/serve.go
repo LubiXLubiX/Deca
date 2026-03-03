@@ -192,7 +192,7 @@ var serveCmd = &cobra.Command{
 		proxyPort := 3000
 
 		fmt.Println("\n\033[1;34m--------------------------------------------------\033[0m")
-		fmt.Printf("\033[1;32m🚀 [Deca] Unified Server: \033[1;36mhttp://localhost:%d\033[0m\n", proxyPort)
+		fmt.Printf("\033[1;32m[Deca] Unified Server: \033[1;36mhttp://localhost:%d\033[0m\n", proxyPort)
 		fmt.Println("\033[1;34m--------------------------------------------------\033[0m")
 		fmt.Println("\033[0;90mCleaning up ports...\033[0m")
 
