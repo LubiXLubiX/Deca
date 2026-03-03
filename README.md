@@ -1,266 +1,157 @@
-<div align="center">
-<img src="/decabanner.png" alt="Deca Logo" width="100%">
+# Deca CLI
+![Deca Logo](/decabanner.png)
 
-<h1>🚀 Deca CLI</h1>
-<p><b>The ultimate CLI for the LubiX Framework. Zero-config, single-port, full-stack React + PHP development.</b></p>
+Deca is a cross-platform command-line interface designed for a **zero-config, single-port** development experience in the LubiX ecosystem.
 
-</div>
+## The Main Goal
+Deca bridges the gap between modern React reactivity and stable PHP backends by providing a **unified developer experience**.
+- **One Port (`3000`)** for everything (frontend + backend).
+- **Zero Node/Vite** requirement for local development.
+- **FastCGI Integration** for PHP (No internal ports exposed).
+- **On-the-fly React Bundling** with esbuild.
 
-💡 The Main Goal
+---
 
-Deca is a blazing-fast, cross-platform command-line interface designed to power the LubiX ecosystem. It bridges the gap between modern React reactivity and stable PHP backends by providing a unified developer experience without the usual configuration headaches.
+## Features
+- **Unified Dev Server**: Serves your frontend assets and proxies API requests seamlessly.
+- **Zero-Build React**: Write React/JSX and see changes instantly without `npm install` or complex build steps.
+- **Live Reload (SSE)**: Automatic browser refresh when you save your code.
+- **Database Management**: Integrated commands for migrations and rollbacks.
+- **Code Generation**: Generate controllers, models, and migrations.
+- **Cross-Platform**: Full support for macOS (Intel/Apple Silicon), Linux, and Windows.
 
-Why use Deca?
+---
 
-🔌 One Port for Everything: Serve both your frontend React assets and proxy your PHP API requests seamlessly through a single port (3000). No CORS issues, no multiple terminal tabs.
+## Installation
 
-⚡ Zero Node/Vite Required: Write React/JSX and see changes instantly. No npm install, no heavy node_modules, and no complex Vite/Webpack build steps for local development.
+### Requirements
+- **PHP** with `php-cgi` available in PATH.
+- **Composer**.
 
-🐘 FastCGI Integration: Communicates directly with php-cgi. Your PHP backend is processed internally without exposing additional internal ports.
+If you only run the frontend, Deca still needs `php-cgi` because the unified server is designed to serve frontend + backend from one port.
 
-📦 On-the-fly Bundling: Powered by esbuild under the hood, compiling your JSX/TSX instantly.
+### Option A: From GitHub Releases (Recommended)
+Download the pre-compiled binary for your system from the [Releases](https://github.com/LubiXLubiX/Deca/releases) page.
 
-🔄 Live Reload (SSE): Automatic, lightning-fast browser refresh when you save your code using Server-Sent Events.
+#### macOS (Intel / Apple Silicon)
+1. Download `deca_darwin_arm64` (Apple Silicon) or `deca_darwin_amd64` (Intel).
+2. Rename the file to `deca`.
+3. Move it to your PATH:
+   ```bash
+   chmod +x deca
+   sudo mv deca /usr/local/bin/deca
+   ```
+4. Verify: `deca version`
 
-⚙️ Requirements
+#### Linux
+1. Download `deca_linux_amd64`.
+2. Rename the file to `deca`.
+3. Move it to your PATH:
+   ```bash
+   chmod +x deca
+   sudo mv deca /usr/local/bin/deca
+   ```
+4. Verify: `deca version`
 
-Before installing Deca, ensure your system has the following:
+#### Windows (PowerShell)
+1. Download `deca_windows_amd64.exe`.
+2. Rename the file to `deca.exe`.
+3. Create a folder for binaries: `mkdir $env:USERPROFILE\bin`
+4. Move the file: `move .\deca.exe $env:USERPROFILE\bin\deca.exe`
+5. Add to PATH: Search for "Edit environment variables" -> Path -> Add `%USERPROFILE%\bin`
+6. Verify: `deca version`
 
-PHP (8.0+ recommended) with php-cgi available in your system PATH.
-
-Composer (for managing PHP dependencies).
-
-Note: Even if you are only running the frontend, Deca still requires php-cgi because the unified server is fundamentally designed to handle both environments simultaneously.
-
-📥 Installation
-
-Option A: Pre-compiled Binaries (Recommended)
-
-Download the latest pre-compiled binary for your operating system from the GitHub Releases page.
-
-<details>
-<summary><b>🍎 macOS (Intel & Apple Silicon)</b></summary>
-
-Download deca_darwin_arm64 (for M1/M2/M3) or deca_darwin_amd64 (for Intel).
-
-Rename the downloaded file to deca.
-
-Make it executable and move it to your PATH:
-
-chmod +x deca
-sudo mv deca /usr/local/bin/deca
-
-
-Verify installation:
-
-deca version
-
-
-</details>
-
-<details>
-<summary><b>🐧 Linux</b></summary>
-
-Download deca_linux_amd64.
-
-Rename the file to deca.
-
-Make it executable and move it to your PATH:
-
-chmod +x deca
-sudo mv deca /usr/local/bin/deca
-
-
-Verify installation:
-
-deca version
-
-
-</details>
-
-<details>
-<summary><b>🪟 Windows (PowerShell)</b></summary>
-
-Download deca_windows_amd64.exe.
-
-Rename the file to deca.exe.
-
-Create a bin folder in your user directory:
-
-mkdir $env:USERPROFILE\bin
-
-
-Move the executable:
-
-move .\deca.exe $env:USERPROFILE\bin\deca.exe
-
-
-Add it to your PATH:
-
-Search Windows for "Edit environment variables for your account".
-
-Select Path and click Edit -> New.
-
-Add %USERPROFILE%\bin.
-
-Restart your terminal.
-
-Verify installation:
-
-deca version
-
-
-</details>
-
-Option B: Build from Source
-
-If you have Go 1.21+ installed, you can compile Deca yourself:
-
-git clone [https://github.com/LubiXLubiX/Deca.git](https://github.com/LubiXLubiX/Deca.git)
+### Option B: Build from Source
+If you have **Go 1.21+** installed:
+```bash
+git clone https://github.com/LubiXLubiX/Deca.git
 cd Deca/Deca-CLI
 go build -o deca main.go
+# Move the 'deca' binary to your PATH as shown above.
+```
 
-# Move the resulting 'deca' binary to your PATH based on your OS.
+---
 
+## Quickstart
 
-🚀 Quickstart
-
-Get a full-stack React + PHP app running in seconds:
-
-# 1. Scaffold a new LubiX project
+Create a new LubiX project and start the unified server:
+```bash
 deca create-project my-app
-
-# 2. Enter the directory
 cd my-app
-
-# 3. Start the unified development server
 deca lubix serve
+```
 
+Notes:
+- `deca create-project` automatically copies `.env.example` to `.env` and attempts to run `composer install`.
+- If Composer fails (network / PHP extensions), run `composer install` manually inside the project.
 
-What happens under the hood? > deca create-project automatically copies .env.example to .env and attempts to run composer install. If it fails (due to missing PHP extensions), you can run composer install manually.
+---
 
-🛠️ Command Reference
+## Command Reference
 
-Deca comes with a powerful set of commands to manage your entire development lifecycle.
+| Command | Description |
+| :--- | :--- |
+| `deca version` | Show current version |
+| `deca upgrade` | Upgrade Deca CLI to the latest version (auto) |
+| `deca create-project <name>` | Create a new LubiX project |
+| `deca lubix serve` | Start unified server at `http://localhost:3000` |
+| `deca lubix dev` | Alias for `deca lubix serve` |
+| `deca lubix migrate` | Execute pending database migrations |
+| `deca lubix migrate:rollback [N]` | Rollback N batches of migrations |
+| `deca lubix db:create` | Create the database defined in .env |
+| `deca lubix make:controller <Name>` | Generate a controller |
+| `deca lubix make:model <Name>` | Generate a model |
+| `deca lubix make:migration <name>` | Generate a migration |
+| `deca doctor` | Check system requirements (PHP, CGI, etc.) |
 
-🟢 Core & Server
+---
 
-Command
+## Upgrade Deca CLI
 
-Description
-
-deca version
-
-Show the currently installed version of Deca.
-
-deca doctor
-
-Check system requirements (PHP, CGI, Composer, etc.) and diagnose issues.
-
-deca create-project <name>
-
-Scaffold a fresh LubiX React+PHP project.
-
-deca lubix serve
-
-Start the unified development server at http://localhost:3000.
-
-deca lubix dev
-
-Alias for deca lubix serve.
-
-🔵 Database & Migrations
-
-Command
-
-Description
-
-deca lubix db:create
-
-Create the database defined in your .env file.
-
-deca lubix migrate
-
-Execute all pending database migrations.
-
-deca lubix migrate:rollback [N]
-
-Rollback the last N batches of migrations (default is 1).
-
-🟣 Generators (Scaffolding)
-
-Command
-
-Description
-
-deca lubix make:controller <Name>
-
-Generate a new PHP Controller class.
-
-deca lubix make:model <Name>
-
-Generate a new PHP Model class.
-
-deca lubix make:migration <Name>
-
-Generate a new database migration file.
-
-🔄 Upgrading Deca CLI
-
-Deca can update itself seamlessly.
-
-Automatic Upgrade:
-
+### Automatic Upgrade
+```bash
 deca upgrade
+```
+This will:
+- Fetch the latest source from GitHub
+- Build a new binary
+- Replace your current `deca` binary
+- If permission denied, it will show manual steps
 
-
-This command fetches the latest source from GitHub, compiles a new binary, and replaces your current deca executable. (If you get a permission denied error, run it with sudo on Unix systems).
-
-Manual Upgrade:
-If you prefer manual control:
-
-git clone [https://github.com/LubiXLubiX/Deca.git](https://github.com/LubiXLubiX/Deca.git)
+### Manual Upgrade
+If automatic upgrade fails or you prefer manual control:
+```bash
+git clone https://github.com/LubiXLubiX/Deca.git
 cd Deca/Deca-CLI
-git pull origin main
+git pull
 go build -o deca main.go
-# Replace your current binary with the newly built one
+# Replace your current binary with the new one
+sudo mv deca /usr/local/bin/deca  # macOS/Linux
+# or
+move .\deca.exe $env:USERPROFILE\bin\deca.exe  # Windows
+```
 
+---
 
-🐛 Troubleshooting
+## Troubleshooting
 
-❌ "php-cgi" not found
+### "php-cgi" not found
+Deca requires `php-cgi` for backend processing.
+- **macOS**: `brew install php`
+- **Linux**: `sudo apt install php-cgi` (or equivalent)
+- **Verify**: Run `deca doctor` to check your environment.
 
-Deca requires php-cgi for backend processing to work.
+### "Permission Denied" (macOS/Linux)
+Ensure the binary is executable: `chmod +x /path/to/deca`
 
-macOS: brew install php
+### Blank Screen on http://localhost:3000
+If the page is blank:
+- Check the browser Console.
+- Check the Network tab and confirm `/deca/app.js` returns 200.
 
-Linux (Ubuntu/Debian): sudo apt install php-cgi
+Deca rewrites React JSX runtime imports (for example `react/jsx-runtime`) to `https://esm.sh/...` so the browser can load the bundle without Node/Vite.
 
-Windows: Ensure the PHP folder containing php-cgi.exe is in your system PATH.
+---
 
-Run deca doctor to verify your environment setup.
-
-❌ Permission Denied (macOS/Linux)
-
-If you cannot execute the deca command, ensure the binary has execution rights:
-
-chmod +x /path/to/deca
-
-
-❌ Blank Screen on http://localhost:3000
-
-If the browser shows a white screen:
-
-Open the Browser Console (F12) to check for React syntax errors.
-
-Check the Network Tab and ensure /deca/app.js returns a 200 OK status.
-
-How it works: Deca rewrites React JSX runtime imports (e.g., react/jsx-runtime) to point to https://esm.sh/.... Ensure you have an active internet connection so the browser can fetch these ES modules.
-
-📄 License
-
-Deca CLI and the LubiX framework are distributed under the MIT License. See LICENSE for more information.
-
-<div align="center">
-<i>Built with ❤️ by Rakhan for the modern web.</i>
-</div>
+## License
+Distributed under the MIT License. See `LICENSE` for more information.
