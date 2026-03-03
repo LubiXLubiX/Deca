@@ -11,8 +11,12 @@ import (
 func detectProjectRoot(startDir string) string {
 	curr := startDir
 	for {
-		if _, err := os.Stat(filepath.Join(curr, "public")); err == nil {
-			return curr
+		// Check for common LubiX project markers
+		markers := []string{"public", "composer.json", "packages/lubix-cli"}
+		for _, marker := range markers {
+			if _, err := os.Stat(filepath.Join(curr, marker)); err == nil {
+				return curr
+			}
 		}
 		parent := filepath.Dir(curr)
 		if parent == curr {
