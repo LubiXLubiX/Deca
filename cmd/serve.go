@@ -39,9 +39,19 @@ func compileJSLikeToESM(source string, loader api.Loader, absPath string) (strin
 	// Classic JSX runtime expects `React` identifier in scope.
 	// In a no-bundler environment, ensure it's always available.
 	if loader == api.LoaderJSX || loader == api.LoaderTSX {
-		if strings.Contains(out, "React.createElement") && !strings.Contains(out, "import React") {
+		// Inject React import if missing but used
+		if (strings.Contains(out, "React.createElement") || strings.Contains(out, "React.Fragment")) && !strings.Contains(out, "import React") {
 			out = "import React from 'https://esm.sh/react@18.2.0';\n" + out
 		}
+		// Map 'react' and 'react/jsx-runtime' to esm.sh URLs if they are used as imports
+		out = strings.ReplaceAll(out, "from \"react\"", "from \"https://esm.sh/react@18.2.0\"")
+		out = strings.ReplaceAll(out, "from 'react'", "from 'https://esm.sh/react@18.2.0'")
+		out = strings.ReplaceAll(out, "from \"react/jsx-runtime\"", "from \"https://esm.sh/react@18.2.0/jsx-runtime\"")
+		out = strings.ReplaceAll(out, "from 'react/jsx-runtime'", "from 'https://esm.sh/react@18.2.0/jsx-runtime'")
+		out = strings.ReplaceAll(out, "from \"react-dom\"", "from \"https://esm.sh/react-dom@18.2.0\"")
+		out = strings.ReplaceAll(out, "from 'react-dom'", "from 'https://esm.sh/react-dom@18.2.0'")
+		out = strings.ReplaceAll(out, "from \"lucide-react\"", "from \"https://esm.sh/lucide-react\"")
+		out = strings.ReplaceAll(out, "from 'lucide-react'", "from 'https://esm.sh/lucide-react'")
 	}
 	return out, nil
 }
@@ -62,7 +72,7 @@ func buildBundledAppJS(frontendDir string) (string, error) {
 			Loader:     api.LoaderJSX,
 		},
 		Bundle:            true,
-		External:          []string{"https://*"},
+		External:          []string{"https://*", "react", "react/jsx-runtime", "react-dom", "lucide-react"},
 		Write:             false,
 		Format:            api.FormatESModule,
 		Platform:          api.PlatformBrowser,
