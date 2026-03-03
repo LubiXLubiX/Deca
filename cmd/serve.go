@@ -8,15 +8,84 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/evanw/esbuild/pkg/api"
 	"github.com/spf13/cobra"
 )
 
+func compileJSLikeToESM(source string, loader api.Loader, absPath string) (string, error) {
+	result := api.Transform(source, api.TransformOptions{
+		Loader:            loader,
+		Format:            api.FormatESModule,
+		Target:            api.ES2020,
+		Sourcemap:         api.SourceMapInline,
+		Sourcefile:        absPath,
+		JSX:               api.JSXTransform,
+		JSXFactory:        "React.createElement",
+		JSXFragment:       "React.Fragment",
+		MinifyWhitespace:  false,
+		MinifyIdentifiers: false,
+		MinifySyntax:      false,
+	})
+	if len(result.Errors) > 0 {
+		// Return first error for readability
+		return "", fmt.Errorf(result.Errors[0].Text)
+	}
+	out := string(result.Code)
+	// Classic JSX runtime expects `React` identifier in scope.
+	// In a no-bundler environment, ensure it's always available.
+	if loader == api.LoaderJSX || loader == api.LoaderTSX {
+		if strings.Contains(out, "React.createElement") && !strings.Contains(out, "import React") {
+			out = "import React from 'https://esm.sh/react@18.2.0';\n" + out
+		}
+	}
+	return out, nil
+}
+
+func buildBundledAppJS(frontendDir string) (string, error) {
+	entryPath := filepath.Join(frontendDir, "src", "main.js")
+	entrySource, err := os.ReadFile(entryPath)
+	if err != nil {
+		return "", err
+	}
+
+	// Build from stdin so we can force the loader to JSX even for .js entry files.
+	result := api.Build(api.BuildOptions{
+		Stdin: &api.StdinOptions{
+			Contents:   string(entrySource),
+			ResolveDir: filepath.Dir(entryPath),
+			Sourcefile: entryPath,
+			Loader:     api.LoaderJSX,
+		},
+		Bundle:            true,
+		External:          []string{"https://*"},
+		Write:             false,
+		Format:            api.FormatESModule,
+		Platform:          api.PlatformBrowser,
+		Target:            api.ES2020,
+		Sourcemap:         api.SourceMapInline,
+		JSX:               api.JSXTransform,
+		JSXFactory:        "React.createElement",
+		JSXFragment:       "React.Fragment",
+		MinifyWhitespace:  false,
+		MinifyIdentifiers: false,
+		MinifySyntax:      false,
+	})
+	if len(result.Errors) > 0 {
+		return "", fmt.Errorf(result.Errors[0].Text)
+	}
+	if len(result.OutputFiles) == 0 {
+		return "", fmt.Errorf("no output from esbuild")
+	}
+	return string(result.OutputFiles[0].Contents), nil
+}
+
 type sseHub struct {
+	mu      sync.RWMutex
 	clients map[chan string]struct{}
 }
 
@@ -25,14 +94,20 @@ func newSSEHub() *sseHub {
 }
 
 func (h *sseHub) add(c chan string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.clients[c] = struct{}{}
 }
 
 func (h *sseHub) remove(c chan string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	delete(h.clients, c)
 }
 
 func (h *sseHub) broadcast(msg string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	for c := range h.clients {
 		select {
 		case c <- msg:
@@ -89,7 +164,7 @@ func startFrontendWatcher(frontendDir string, hub *sseHub, stop <-chan struct{})
 					return nil
 				}
 				name := strings.ToLower(info.Name())
-				if strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css") || strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".svelte") {
+				if strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".jsx") || strings.HasSuffix(name, ".css") || strings.HasSuffix(name, ".html") {
 					if info.ModTime().After(last) {
 						last = info.ModTime()
 						changed = true
@@ -165,6 +240,30 @@ var serveCmd = &cobra.Command{
 				}
 			}
 		})
+
+		// Bundled frontend entrypoint (single file) to avoid ESM/runtime interop issues
+		bundleHandler := func(w http.ResponseWriter, r *http.Request) {
+			fmt.Printf("\033[0;90m[Deca] Bundle %s %s\033[0m\n", r.Method, r.URL.Path)
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			if frontendDir == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte("throw new Error('frontend not found');"))
+				return
+			}
+			js, err := buildBundledAppJS(frontendDir)
+			if err != nil {
+				fmt.Printf("\033[0;31m[Deca] Bundle error: %v\033[0m\n", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				safe := strings.ReplaceAll(err.Error(), "\\", "\\\\")
+				safe = strings.ReplaceAll(safe, "\"", "\\\"")
+				_, _ = w.Write([]byte("throw new Error(\"bundle error: " + safe + "\");"))
+				return
+			}
+			_, _ = w.Write([]byte(js))
+		}
+		mux.HandleFunc("/__deca/app.js", bundleHandler)
+		mux.HandleFunc("/deca/app.js", bundleHandler)
 
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			p := r.URL.Path
@@ -281,31 +380,32 @@ var serveCmd = &cobra.Command{
 
 			filePath := filepath.Join(frontendDir, filepath.Clean(p))
 
-			// Handle .js imports that might actually be .svelte files (Vite style)
-			if strings.HasSuffix(p, ".js") {
-				// Check if a .svelte file exists with the same name
-				sveltePath := strings.TrimSuffix(filePath, ".js") + ".svelte"
-				if _, err := os.Stat(sveltePath); err == nil {
-					content, _ := os.ReadFile(sveltePath)
-					js := compileSvelteS2(string(content), p)
-					w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-					_, _ = w.Write([]byte(js))
-					return
-				}
-			}
-
-			// Svelte S2: On-the-fly compilation for .svelte files
-			if strings.HasSuffix(p, ".svelte") {
+			// Handle JS/JSX/TS/TSX requests (compile on the fly to ESM)
+			if strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".jsx") || strings.HasSuffix(p, ".ts") || strings.HasSuffix(p, ".tsx") {
 				content, err := os.ReadFile(filePath)
 				if err != nil {
-					fmt.Printf("\033[0;31m[Deca] 404 Svelte: %s\033[0m\n", filePath)
+					fmt.Printf("\033[0;31m[Deca] 404 File Not Found: %s\033[0m\n", filePath)
 					http.NotFound(w, r)
 					return
 				}
-				// Minimalistic Svelte S2 Compiler (Regex-based transform for dev)
-				js := compileSvelteS2(string(content), p)
+
+				// Default to JSX loader for .js and .jsx to allow JSX syntax in both
+				ext := strings.ToLower(filepath.Ext(p))
+				loader := api.LoaderJSX
+				if ext == ".ts" || ext == ".tsx" {
+					loader = api.LoaderTSX
+				}
+
+				fmt.Printf("\033[0;90m[Deca] Transforming %s...\033[0m\n", p)
+				compiled, cErr := compileJSLikeToESM(string(content), loader, filePath)
+				if cErr != nil {
+					fmt.Printf("\033[0;31m[Deca] Transform Error: %v\033[0m\n", cErr)
+					http.Error(w, "JS compile error: "+cErr.Error(), http.StatusInternalServerError)
+					return
+				}
+				fmt.Printf("\033[0;32m[Deca] Transform Success: %s\033[0m\n", p)
 				w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-				_, _ = w.Write([]byte(js))
+				_, _ = w.Write([]byte(compiled))
 				return
 			}
 
@@ -334,115 +434,7 @@ var serveCmd = &cobra.Command{
 }
 
 func compileSvelteS2(source string, path string) string {
-	componentName := filepath.Base(path)
-	componentName = strings.TrimSuffix(componentName, ".svelte")
-	componentName = strings.TrimSuffix(componentName, ".js")
-
-	// Extract script, template, and style
-	scriptRegex := regexp.MustCompile(`(?s)<script>(.*?)</script>`)
-	styleRegex := regexp.MustCompile(`(?s)<style>(.*?)</style>`)
-
-	scriptMatch := scriptRegex.FindStringSubmatch(source)
-	script := ""
-	if len(scriptMatch) > 1 {
-		script = scriptMatch[1]
-	}
-
-	styleMatch := styleRegex.FindStringSubmatch(source)
-	style := ""
-	if len(styleMatch) > 1 {
-		style = styleMatch[1]
-	}
-
-	template := scriptRegex.ReplaceAllString(source, "")
-	template = styleRegex.ReplaceAllString(template, "")
-	template = strings.TrimSpace(template)
-	
-	// Escape template for safe JS string embedding
-	escapeForJS := func(s string) string {
-		s = strings.ReplaceAll(s, "\\", "\\\\")
-		s = strings.ReplaceAll(s, "\"", "\\\"")
-		s = strings.ReplaceAll(s, "`", "\\x60")
-		s = strings.ReplaceAll(s, "${", "\\${")
-		s = strings.ReplaceAll(s, "\n", "\\n")
-		s = strings.ReplaceAll(s, "\r", "")
-		return s
-	}
-	
-	escapedTemplate := escapeForJS(template)
-	escapedStyle := escapeForJS(style)
-
-	// Transform script: change `let x = y` to `this.x = y` for reactive variables
-	// and wrap functions to maintain this context
-	letRegex := regexp.MustCompile(`\blet\s+(\w+)\s*=`)
-	script = letRegex.ReplaceAllString(script, "this.$1 =")
-	constRegex := regexp.MustCompile(`\bconst\s+(\w+)\s*=\s*\(`)
-	script = constRegex.ReplaceAllString(script, "this.$1 = (")
-	
-	// Build the JS - proper class with execution context
-	js := fmt.Sprintf(`/* Deca S2: %s */
-export default class %s {
-    constructor(opts) {
-        this.target = opts.target;
-        this.props = opts.props || {};
-        this.count = 0;
-        this.name = 'User';
-        Object.assign(this, this.props);
-        this.init();
-    }
-    init() {
-        try {
-            // Execute script in component context
-            (function(){
-                %s
-            }).call(this);
-        } catch(e) { 
-            console.error("[S2] Init error:", e); 
-        }
-        this.render();
-    }
-    render() {
-        try {
-            console.log('[S2] Rendering...', this.constructor.name);
-            let html = "%s";
-            // Interpolate ${var}
-            html = html.replace(/\$\{([^}]+)\}/g, (match, expr) => {
-                try { 
-                    const val = (new Function('return ' + expr)).call(this);
-                    return val !== undefined ? val : ''; 
-                } catch(e) { 
-                    return ''; 
-                }
-            });
-            this.target.innerHTML = html;
-            
-            // Bind events
-            this.target.querySelectorAll('[on\\:click]').forEach(el => {
-                const code = el.getAttribute('on:click');
-                el.addEventListener('click', () => {
-                    (new Function('return ' + code)).call(this);
-                });
-            });
-            
-            // Inject styles
-            const css = "%s";
-            if (css) {
-                let s = document.getElementById('s2-'+this.constructor.name);
-                if (!s) {
-                    s = document.createElement('style');
-                    s.id = 's2-'+this.constructor.name;
-                    document.head.appendChild(s);
-                }
-                s.textContent = css.replace(/\$\{[^}]+\}/g, '');
-                console.log('[S2] CSS injected');
-            }
-            console.log('[S2] Render complete');
-        } catch(e) {
-            console.error("[S2] Render error:", e);
-            this.target.innerHTML = '<div style="color:red;padding:20px">S2 Error: '+e.message+'</div>';
-        }
-    }
-}`, path, componentName, script, escapedTemplate, escapedStyle)
-
-	return js
+	_ = source
+	_ = path
+	return "throw new Error('Svelte support has been removed from this Deca build.');"
 }
